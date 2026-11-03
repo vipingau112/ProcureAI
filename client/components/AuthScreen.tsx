@@ -62,9 +62,30 @@ export default function AuthScreen({ onAuthed }: { onAuthed: (user: User) => voi
   const [info, setInfo] = useState('');
   const [cooldown, setCooldown] = useState(0);
   const [demo, setDemo] = useState<{ enabled: boolean; email: string } | null>(null);
+  const [waking, setWaking] = useState(false);
 
+  // Free hosting puts the server to sleep when idle. Keep trying for a while and say what is happening.
   useEffect(() => {
-    api.demoInfo().then(setDemo).catch(() => setDemo(null));
+    let cancelled = false;
+    let tries = 0;
+    const attempt = () => {
+      api.demoInfo()
+        .then((d) => {
+          if (cancelled) return;
+          setDemo(d);
+          setWaking(false);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setDemo(null);
+          if (++tries < 30) {
+            setWaking(true);
+            setTimeout(attempt, 4000);
+          } else setWaking(false);
+        });
+    };
+    attempt();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -172,9 +193,9 @@ export default function AuthScreen({ onAuthed }: { onAuthed: (user: User) => voi
           <p className="auth-tag">An AI buyer that shops the bazaar for you. You just say yes.</p>
           <div className="rangoli-wrap"><Rangoli size={300} /></div>
           <ul className="auth-points">
-            <li><b>Global Reach:</b> Shop and pay seamlessly in your currency</li>
-            <li><b>Automated Accounting:</b> Real-time pdf invoice ready </li>
-            <li><b>Protected:</b> Your data is secure with us</li>
+            <li>Pay from anywhere, in your own currency</li>
+            <li>An invoice for every payment, ready to print</li>
+            <li>Secure login with OTP</li>
           </ul>
         </div>
       </section>
@@ -184,6 +205,11 @@ export default function AuthScreen({ onAuthed }: { onAuthed: (user: User) => voi
           <h2>{titles[mode][0]}</h2>
           <p className="auth-sub">{titles[mode][1]}</p>
 
+          {waking && (
+            <p className="notice demo" role="status">
+              <strong>Waking up the server.</strong> Free hosting sleeps when idle, so this can take up to a minute. This page keeps retrying by itself. (Running locally? Check that the server is started.)
+            </p>
+          )}
           {info && <p className="notice ok" role="status">{info}</p>}
           {error && <p className="notice bad" role="alert">{error}</p>}
           {mode === 'login' && demo?.enabled && (

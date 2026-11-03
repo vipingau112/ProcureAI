@@ -58,6 +58,15 @@ After adding keys, run `npm run check` in `server/`. It tests each service and t
 
 To pay in the sandbox you need a sandbox **buyer** account from developer.paypal.com (Testing tools, Sandbox accounts). If PayPal says the seller does not accept your currency, make the sandbox buyer and seller accounts United States accounts.
 
+## Deploy your own copy on Render
+
+`render.yaml` describes two web services: the API (`server/`) and the dashboard (`client/`). In Render choose **New, Blueprint**, connect this repository and fill in the prompted values. The two services need each other's address, so after the first deploy:
+
+1. On the API service set `SERVER_URL` (its own URL) and `CLIENT_URL` (the dashboard URL).
+2. On the dashboard service set `NEXT_PUBLIC_API_URL` (the API URL), then redeploy it. This value is baked in at build time.
+
+Use URLs without a trailing slash. On Render's free plan a service sleeps after about 15 minutes without traffic and the disk is temporary, so accounts and payment history reset when the server sleeps. The demo account is recreated automatically, which is why the login screen offers it.
+
 ## Built with
 
 - **AI:** Gemini or Claude (tool calling)

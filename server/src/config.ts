@@ -11,8 +11,8 @@ const otpDemo = process.env.OTP_DEMO_MODE ? process.env.OTP_DEMO_MODE === 'true'
 
 export const config = {
   port: num(process.env.PORT, 5000),
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:3000',
-  serverUrl: process.env.SERVER_URL || 'http://localhost:5000',
+  clientUrl: (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, ''),
+  serverUrl: (process.env.SERVER_URL || 'http://localhost:5000').replace(/\/+$/, ''),
 
   anthropicKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',

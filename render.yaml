@@ -1,0 +1,54 @@
+# Render Blueprint: one API service and one dashboard service.
+# Secret values (keys) are never stored here. Render asks for them when you create the Blueprint.
+services:
+  - type: web
+    name: procureai-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Addresses: fill in after the first deploy (no trailing slash).
+      - key: SERVER_URL
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      # AI agent. Leave GEMINI_API_KEY empty to use the built-in scripted agent.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-flash-latest
+      - key: AI_RUNS_PER_DAY
+        value: "60"
+      # Services. Leave empty to use the built-in mocks.
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Accounts. Demo mode shows the OTP on screen because no email service is connected.
+      - key: OTP_DEMO_MODE
+        value: "true"
+      - key: DEMO_ACCOUNT
+        value: "true"
+      - key: AUTH_SECRET
+        generateValue: true
+
+  - type: web
+    name: procureai-web
+    runtime: node
+    plan: free
+    rootDir: client
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # The API service URL (no trailing slash). Fill in after the first deploy, then redeploy this service.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
