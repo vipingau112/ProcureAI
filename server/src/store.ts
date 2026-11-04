@@ -1,8 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import { config } from './config';
+import { persistence } from './persistence';
 import type { Budget, CatalogProduct, InventoryItem, LogEntry, LogKind, Proposal } from './types';
 
 const seedInventory = (): InventoryItem[] => [
@@ -91,51 +90,58 @@ export class Store {
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
-// ---- per-user registry + disk persistence ---------------------------------------------------
+// ---- per-user registry + persistence ---------------------------------------------------------------------------
+// While the server runs everything lives in memory. Saved data is loaded once at startup (initStores), then written back
+// to the database (or JSON files) every few seconds, and immediately after a payment.
 
-const storesDir = path.join(config.dataDir, 'stores');
 const stores = new Map<string, Store>();
-const fileFor = (id: string) => path.join(storesDir, `${id.replace(/[^a-zA-Z0-9_-]/g, '')}.json`);
 
 export function storeFor(userId: string): Store {
   let s = stores.get(userId);
   if (!s) {
     s = new Store(userId);
-    try {
-      s.restore(JSON.parse(fs.readFileSync(fileFor(userId), 'utf8')));
-      s.lastSaved = JSON.stringify(s.snapshot());
-    } catch {
-      /* first visit for this user */
-    }
     stores.set(userId, s);
   }
   return s;
 }
 
-function saveAll() {
+/** Loads every user's saved data. Call once at startup, after persistence.init(). */
+export async function initStores(): Promise<void> {
+  for (const [id, data] of await persistence.loadAllUserData()) {
+    const s = storeFor(id);
+    s.restore(data);
+    s.lastSaved = JSON.stringify(s.snapshot());
+  }
+}
+
+async function saveStore(s: Store) {
+  const json = JSON.stringify(s.snapshot());
+  if (json === s.lastSaved) return;
+  await persistence.saveUserData(s.userId, json);
+  s.lastSaved = json;
+}
+
+/** Saves one user's data now (used right after a payment is captured). */
+export async function flushUser(userId: string): Promise<void> {
+  const s = stores.get(userId);
+  if (s) await saveStore(s);
+}
+
+export async function flushAll(): Promise<void> {
   for (const s of stores.values()) {
     try {
-      const json = JSON.stringify(s.snapshot());
-      if (json === s.lastSaved) continue;
-      fs.mkdirSync(storesDir, { recursive: true });
-      const f = fileFor(s.userId);
-      fs.writeFileSync(f + '.tmp', json);
-      fs.renameSync(f + '.tmp', f);
-      s.lastSaved = json;
-    } catch (e) {
-      console.warn('[store] could not save user data:', e);
+      await saveStore(s);
+    } catch (e: any) {
+      console.warn('[store] could not save user data:', e?.message ?? e);
     }
   }
 }
 
-try {
-  fs.mkdirSync(storesDir, { recursive: true });
-  for (const f of fs.readdirSync(storesDir)) if (f.endsWith('.json')) storeFor(f.slice(0, -5)); // so PayPal returns still find old orders after a restart
-} catch {
-  /* nothing saved yet */
-}
-setInterval(saveAll, 3000).unref();
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { saveAll(); process.exit(0); });
+let saving: Promise<void> | null = null;
+setInterval(() => {
+  if (!saving) saving = flushAll().finally(() => { saving = null; });
+}, 3000).unref();
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, () => { flushAll().finally(() => process.exit(0)); });
 
 /** Finds a proposal in any user's store (PayPal's redirect arrives without a login header). */
 export function findByOrderId(orderId: string) {

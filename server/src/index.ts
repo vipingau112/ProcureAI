@@ -3,12 +3,13 @@ import express from 'express';
 import { newRunId, runAgent } from './agent/procurementAgent';
 import { requireAuth } from './auth/middleware';
 import { authRouter } from './auth/routes';
-import { ensureDemoUser } from './auth/users';
+import { ensureDemoUser, initAuth } from './auth/users';
 import { config, modes } from './config';
 import { volumeDiscount } from './agent/tools';
 import { chargePlan, countryInfo, getRates, PAYPAL_CURRENCIES, roundFor } from './services/currencyService';
+import { persistence } from './persistence';
 import { captureOrder, createOrder } from './services/paypalService';
-import { findByOrderId, findByProposalId, round2, runWithStore, store } from './store';
+import { findByOrderId, findByProposalId, flushUser, initStores, round2, runWithStore, store } from './store';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -44,6 +45,7 @@ app.get('/api/paypal/return', async (req, res) => {
       const item = store.inventory.find((i) => i.sku === p.sku);
       if (item) item.incoming += p.quantity;
       store.log(p.runId, 'info', `Payment captured for ${p.sku === 'CUSTOM' ? 'one-off item' : p.sku}: ${p.payAmount ?? p.total} ${p.payCurrency ?? 'USD'} (capture ${captureId}). Invoice ${p.invoiceNo}.`);
+      await flushUser(found.userId).catch((e: any) => console.warn('[store] could not save the payment right away:', e?.message ?? e));
       return { code: 'paid', id: p.id };
     } catch (e: any) {
       p.status = 'failed';
@@ -234,10 +236,22 @@ app.post('/api/reset', (_req, res) => {
   res.json({ ok: true });
 });
 
-ensureDemoUser();
-
-app.listen(config.port, () => {
-  console.log(`ProcureAI server on :${config.port}`);
-  console.log(`  agent: ${modes.agent} | catalog: ${modes.catalog} | payments: ${modes.payments} | otp: ${modes.otp}`);
-  if (config.demoAccount) console.log(`  demo login: enabled (${config.demoEmail}), shown as a button on the login screen`);
+/** Resolves once saved data is loaded and the server is listening. Exported so tests can wait for it. */
+export const ready: Promise<void> = (async () => {
+  await persistence.init();
+  await initAuth();
+  await initStores();
+  await ensureDemoUser();
+  await new Promise<void>((resolve) => {
+    app.listen(config.port, () => {
+      console.log(`ProcureAI server on :${config.port}`);
+      console.log(`  agent: ${modes.agent} | catalog: ${modes.catalog} | payments: ${modes.payments} | otp: ${modes.otp} | storage: ${modes.db}`);
+      if (config.demoAccount) console.log(`  demo login: enabled (${config.demoEmail}), shown as a button on the login screen`);
+      resolve();
+    });
+  });
+})();
+ready.catch((e: any) => {
+  console.error('Startup failed:', e?.message ?? e);
+  process.exit(1);
 });

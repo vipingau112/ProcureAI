@@ -7,7 +7,25 @@ const num = (v: string | undefined, fallback: number) => {
 };
 
 // Demo mode: the OTP is shown on screen. In that state anyone can already create an account, so a public demo login adds no extra exposure.
-const otpDemo = process.env.OTP_DEMO_MODE ? process.env.OTP_DEMO_MODE === 'true' : !process.env.RESEND_API_KEY;
+const gmailUser = process.env.GMAIL_USER || '';
+const gmailAppPassword = (process.env.GMAIL_APP_PASSWORD || '').replace(/\s+/g, ''); // Google shows App Passwords in groups of four
+const resendKey = process.env.RESEND_API_KEY || '';
+const brevoKey = process.env.BREVO_API_KEY || process.env.BREVO_KEY || '';
+
+// Detect explicit MAIL_PROVIDER env or auto-detect (Brevo -> Gmail -> Resend)
+const explicitProvider = (process.env.MAIL_PROVIDER || '').toLowerCase();
+const mailProvider: 'brevo' | 'gmail' | 'resend' | null = 
+  (explicitProvider === 'brevo' || explicitProvider === 'gmail' || explicitProvider === 'resend')
+    ? (explicitProvider as 'brevo' | 'gmail' | 'resend')
+    : brevoKey
+    ? 'brevo'
+    : gmailUser && gmailAppPassword
+    ? 'gmail'
+    : resendKey
+    ? 'resend'
+    : null;
+
+const otpDemo = process.env.OTP_DEMO_MODE ? process.env.OTP_DEMO_MODE === 'true' : !mailProvider;
 
 export const config = {
   port: num(process.env.PORT, 5000),
@@ -33,7 +51,15 @@ export const config = {
 
   // --- accounts ---
   authSecret: process.env.AUTH_SECRET || '',
-  resendKey: process.env.RESEND_API_KEY || '',
+  resendKey,
+  gmailUser,
+  gmailAppPassword,
+  brevoApiKey: brevoKey,
+  mailProvider,
+  // Stops a signup form from being used to send unlimited email (Gmail allows roughly 500 a day).
+  maxEmailsPerDay: num(process.env.MAX_EMAILS_PER_DAY, 200),
+  // PostgreSQL connection string. Empty = save to JSON files in server/data/.
+  databaseUrl: process.env.DATABASE_URL || '',
   mailFrom: process.env.MAIL_FROM || 'ProcureAI <onboarding@resend.dev>',
   // Demo mode shows the OTP on screen (and in the server log) because no email provider is configured.
   otpDemo,
@@ -50,12 +76,13 @@ export const modes = {
   agent: config.geminiKey ? 'gemini' : config.anthropicKey ? 'claude' : 'scripted-demo',
   catalog: config.channel3Key ? 'channel3' : 'mock',
   payments: config.paypalClientId && config.paypalClientSecret ? 'paypal-sandbox' : 'mock',
-  otp: config.resendKey ? 'email' : 'demo-screen',
+  otp: config.mailProvider ? (config.otpDemo ? 'email+screen' : 'email') : 'demo-screen',
+  db: config.databaseUrl ? 'postgres' : 'files',
 } as const;
 
 if (Boolean(config.paypalClientId) !== Boolean(config.paypalClientSecret)) {
   console.warn('WARNING: only one of PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET is set. Falling back to MOCK payments.');
 }
-if (!config.otpDemo && !config.resendKey) {
-  console.warn('WARNING: OTP_DEMO_MODE=false but RESEND_API_KEY is empty. Nobody will receive OTP codes.');
+if (!config.otpDemo && !config.mailProvider) {
+  console.warn('WARNING: OTP_DEMO_MODE=false but no email is configured (BREVO_API_KEY, GMAIL_USER + GMAIL_APP_PASSWORD, or RESEND_API_KEY). Nobody will receive OTP codes.');
 }

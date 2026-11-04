@@ -9,6 +9,8 @@ import { GoogleGenAI } from '@google/genai';
 import { runAgent } from '../agent/procurementAgent';
 import { config, modes } from '../config';
 import { searchProducts } from '../services/channel3Service';
+import { persistence } from '../persistence';
+import { sendOtpEmail } from '../services/mailer';
 import { createOrder } from '../services/paypalService';
 import { store } from '../store';
 import type { Proposal } from '../types';
@@ -20,6 +22,22 @@ const say = (name: string, status: Status, note: string) => {
   console.log(`[${status}] ${name}: ${note}`);
 };
 const UNAVAILABLE = /out\s*of\s*stock|sold\s*out|discontinued|unavailable/i;
+
+async function checkClaude() {
+  if (modes.agent !== 'claude') return say('Claude', 'SKIP', 'ANTHROPIC_API_KEY not set (scripted demo agent will be used).');
+  try {
+    const client = new Anthropic({ apiKey: config.anthropicKey, authToken: null });
+    const res: any = await client.messages.create({
+      model: config.anthropicModel,
+      max_tokens: 20,
+      messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
+    });
+    const text = (res.content ?? []).map((b: any) => b.text ?? '').join('').trim();
+    say('Claude', 'PASS', `model ${config.anthropicModel} replied "${text.slice(0, 30)}"`);
+  } catch (e: any) {
+    say('Claude', 'FAIL', `${e?.message ?? e}. Check ANTHROPIC_API_KEY and ANTHROPIC_MODEL.`);
+  }
+}
 
 async function checkGemini() {
   const ai = new GoogleGenAI({ apiKey: config.geminiKey });
@@ -36,26 +54,31 @@ async function checkGemini() {
         if (names.length >= 8) break;
       }
       if (names.length) hint = ` Models your key can see: ${names.join(', ')}. Put one in GEMINI_MODEL.`;
-    } catch {
-      /* key probably invalid; the main error above says so */
-    }
+    } catch { /* key probably invalid; the main error above says so */ }
     say('Gemini', 'FAIL', `${String(e?.message ?? e).slice(0, 300)}. Check GEMINI_API_KEY and GEMINI_MODEL.${hint}`);
   }
 }
 
-async function checkClaude() {
-  if (modes.agent !== 'claude') return say('AI model', 'SKIP', 'Neither GEMINI_API_KEY nor ANTHROPIC_API_KEY is set (scripted demo agent will be used).');
+async function checkDatabase() {
+  if (persistence.mode !== 'postgres') return say('Database', 'SKIP', `DATABASE_URL not set, so data is saved as JSON files in ${config.dataDir}.`);
   try {
-    const client = new Anthropic({ apiKey: config.anthropicKey, authToken: null });
-    const res: any = await client.messages.create({
-      model: config.anthropicModel,
-      max_tokens: 20,
-      messages: [{ role: 'user', content: 'Reply with the single word OK.' }],
-    });
-    const text = (res.content ?? []).map((b: any) => b.text ?? '').join('').trim();
-    say('Claude', 'PASS', `model ${config.anthropicModel} replied "${text.slice(0, 30)}"`);
+    await persistence.init();
+    say('Database', 'PASS', `PostgreSQL connected, ${await persistence.ping()}.`);
   } catch (e: any) {
-    say('Claude', 'FAIL', `${e?.message ?? e}. Check ANTHROPIC_API_KEY and ANTHROPIC_MODEL.`);
+    say('Database', 'FAIL', `${e?.message ?? e}`);
+  }
+}
+
+async function checkMail() {
+  if (!config.mailProvider) return say('Email OTP', 'SKIP', 'No GMAIL_USER + GMAIL_APP_PASSWORD (or RESEND_API_KEY), so OTP codes are shown on screen.');
+  const i = process.argv.indexOf('--mail');
+  const to = i >= 0 ? process.argv[i + 1] : '';
+  if (!to) return say('Email OTP', 'SKIP', `Provider: ${config.mailProvider}. To send a real test email run: npm run check -- --mail you@example.com`);
+  try {
+    await sendOtpEmail(to, String(100000 + Math.floor(Math.random() * 900000)), 'signup');
+    say('Email OTP', 'PASS', `test email sent through ${config.mailProvider} to ${to}. Check the inbox and the spam folder.`);
+  } catch (e: any) {
+    say('Email OTP', 'FAIL', `${e?.message ?? e} (the reason is in the [mail] line above)`);
   }
 }
 
@@ -102,6 +125,8 @@ async function main() {
   console.log(`Modes: agent=${modes.agent} catalog=${modes.catalog} payments=${modes.payments}\n`);
   if (modes.agent === 'gemini') await checkGemini();
   else await checkClaude();
+  await checkDatabase();
+  await checkMail();
   await checkChannel3();
   await checkPayPal();
 

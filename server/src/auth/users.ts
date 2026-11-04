@@ -2,6 +2,8 @@ import { createHash, createHmac, randomBytes, randomInt, randomUUID, scryptSync,
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config';
+import { persistence } from '../persistence';
+import { sendOtpEmail } from '../services/mailer';
 
 export class HttpError extends Error {
   constructor(public status: number, message: string, public extra: Record<string, unknown> = {}) {
@@ -23,17 +25,19 @@ const pub = (u: User): PublicUser => ({ id: u.id, email: u.email, name: u.name }
 
 // ---- storage ---------------------------------------------------------------------------------
 
-fs.mkdirSync(config.dataDir, { recursive: true });
-const usersFile = path.join(config.dataDir, 'users.json');
+try {
+  fs.mkdirSync(config.dataDir, { recursive: true });
+} catch {
+  /* read-only disk: AUTH_SECRET must then be set */
+}
 const secretFile = path.join(config.dataDir, 'auth-secret.key');
 const users = new Map<string, User>(); // by email
 
-try {
-  for (const u of JSON.parse(fs.readFileSync(usersFile, 'utf8')) as User[]) users.set(u.email, u);
-} catch {
-  /* no users yet */
+/** Loads the saved accounts. Call once at startup, after persistence.init(). */
+export async function initAuth() {
+  for (const u of await persistence.loadUsers()) users.set(u.email, u);
 }
-const saveUsers = () => fs.writeFileSync(usersFile, JSON.stringify([...users.values()], null, 2));
+const persistUser = (u: User) => persistence.saveUser(u);
 
 function loadSecret(): string {
   if (config.authSecret) return config.authSecret;
@@ -41,7 +45,11 @@ function loadSecret(): string {
     return fs.readFileSync(secretFile, 'utf8').trim();
   } catch {
     const s = randomBytes(32).toString('hex');
-    fs.writeFileSync(secretFile, s);
+    try {
+      fs.writeFileSync(secretFile, s);
+    } catch {
+      console.warn('WARNING: could not save a login secret. Set AUTH_SECRET, or everyone is signed out whenever the server restarts.');
+    }
     return s;
   }
 }
@@ -124,18 +132,23 @@ const hashCode = (email: string, purpose: Purpose, code: string) =>
 
 async function deliver(email: string, code: string, purpose: Purpose) {
   if (config.otpDemo) console.log(`[OTP ${purpose}] ${email} -> ${code}   (demo mode: also shown on screen)`);
-  if (!config.resendKey) return;
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${config.resendKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: config.mailFrom,
-      to: [email],
-      subject: purpose === 'signup' ? 'Your ProcureAI verification code' : 'Reset your ProcureAI password',
-      html: `<p>Your code is <b style="font-size:22px;letter-spacing:4px">${code}</b></p><p>It expires in 5 minutes. If you did not ask for it, you can ignore this email.</p>`,
-    }),
-  });
-  if (!res.ok) throw new HttpError(502, 'We could not send the email right now. Please try again.');
+  if (!config.mailProvider) return;
+  try {
+    await sendOtpEmail(email, code, purpose);
+  } catch (e: any) {
+    if (config.otpDemo) return; // the code is on screen anyway
+    throw new HttpError(e?.status ?? 502, e?.message ?? 'We could not send the email right now. Please try again.');
+  }
+}
+
+/** At most 5 codes per hour to one address, so the form cannot be used to flood someone's inbox. */
+const sentLog = new Map<string, number[]>();
+function checkAddressCap(email: string) {
+  const now = Date.now();
+  const recent = (sentLog.get(email) ?? []).filter((t) => now - t < 3_600_000);
+  if (recent.length >= 5) throw new HttpError(429, 'Too many codes were sent to this address. Please try again in an hour.');
+  recent.push(now);
+  sentLog.set(email, recent);
 }
 
 export async function issueOtp(email: string, purpose: Purpose): Promise<{ demoCode?: string }> {
@@ -144,9 +157,15 @@ export async function issueOtp(email: string, purpose: Purpose): Promise<{ demoC
   if (prev && Date.now() - prev.sentAt < OTP_COOLDOWN) {
     throw new HttpError(429, `Please wait ${Math.ceil((OTP_COOLDOWN - (Date.now() - prev.sentAt)) / 1000)}s before asking for another code.`);
   }
+  checkAddressCap(email);
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
   otps.set(key, { hash: hashCode(email, purpose, code), expires: Date.now() + OTP_TTL, attempts: 0, sentAt: Date.now() });
-  await deliver(email, code, purpose);
+  try {
+    await deliver(email, code, purpose);
+  } catch (e) {
+    otps.delete(key); // nothing was delivered, so do not make the person wait out the cooldown
+    throw e;
+  }
   return config.otpDemo ? { demoCode: code } : {};
 }
 
@@ -179,18 +198,18 @@ export async function signup(input: { name: unknown; email: unknown; password: u
   user.name = name;
   user.passwordHash = hashPassword(password); // an unverified signup may be retried with a new password
   users.set(email, user);
-  saveUsers();
+  await persistUser(user);
 
   return { needsVerification: true, email, ...(await issueOtp(email, 'signup')) };
 }
 
-export function verifySignup(emailRaw: unknown, code: unknown) {
+export async function verifySignup(emailRaw: unknown, code: unknown) {
   const email = normEmail(emailRaw);
   const user = users.get(email);
   if (!user || user.verified) throw new HttpError(400, 'That code is not valid. Please check it or ask for a new one.');
   if (!checkOtp(email, 'signup', code)) throw new HttpError(400, 'That code is wrong or has expired.');
   user.verified = true;
-  saveUsers();
+  await persistUser(user);
   return { token: signToken(user), user: pub(user) };
 }
 
@@ -219,7 +238,7 @@ export async function forgot(emailRaw: unknown) {
   return issueOtp(email, 'reset');
 }
 
-export function resetPassword(emailRaw: unknown, code: unknown, newPassword: unknown) {
+export async function resetPassword(emailRaw: unknown, code: unknown, newPassword: unknown) {
   const email = normEmail(emailRaw);
   if (isDemo(email)) throw new HttpError(400, 'The demo account password cannot be changed.');
   const password = checkPassword(newPassword);
@@ -227,7 +246,7 @@ export function resetPassword(emailRaw: unknown, code: unknown, newPassword: unk
   if (!user || !user.verified || !checkOtp(email, 'reset', code)) throw new HttpError(400, 'That code is wrong or has expired.');
   user.passwordHash = hashPassword(password);
   user.tokenVersion += 1; // signs out every old session
-  saveUsers();
+  await persistUser(user);
 }
 
 export const publicUser = pub;
@@ -235,17 +254,17 @@ export const publicUser = pub;
 // ---- demo account ---------------------------------------------------------------------------------------
 
 /** Creates the shared demo user on startup (when enabled). Returns its id, or null when the demo account is off. */
-export function ensureDemoUser(): string | null {
+export async function ensureDemoUser(): Promise<string | null> {
   if (!config.demoAccount) return null;
   const email = normEmail(config.demoEmail);
   let u = users.get(email);
   if (!u) {
     u = { id: randomUUID(), email, name: 'Demo Buyer', passwordHash: hashPassword(config.demoPassword), verified: true, tokenVersion: 0, createdAt: new Date().toISOString() };
     users.set(email, u);
-    saveUsers();
+    await persistUser(u);
   } else if (!u.verified) {
     u.verified = true;
-    saveUsers();
+    await persistUser(u);
   }
   return u.id;
 }

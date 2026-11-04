@@ -19,7 +19,13 @@ const handle = (fn: (req: any, res: any) => Promise<unknown> | unknown) => async
 authRouter.get('/demo', handle(() => demoInfo()));
 authRouter.post('/demo-login', handle(() => demoLogin()));
 
-authRouter.post('/signup', handle((req) => signup(req.body ?? {})));
+// Anything that sends an email also shares one hourly budget per IP address.
+const mailBudget = (req: any) => rateLimit(`mail:${req.ip}`, 20, 3_600_000);
+
+authRouter.post('/signup', handle((req) => {
+  mailBudget(req);
+  return signup(req.body ?? {});
+}));
 
 authRouter.post('/verify', handle((req) => {
   rateLimit(`verify:${req.ip}`, 20, 10 * 60_000);
@@ -31,11 +37,15 @@ authRouter.post('/login', handle((req) => {
   return login(req.body?.email, req.body?.password);
 }));
 
-authRouter.post('/resend', handle((req) => resend(req.body?.email, req.body?.purpose)));
+authRouter.post('/resend', handle((req) => {
+  mailBudget(req);
+  return resend(req.body?.email, req.body?.purpose);
+}));
 
 // Always answers the same way, whether or not the email has an account.
 authRouter.post('/forgot', handle(async (req) => {
   rateLimit(`forgot:${req.ip}`, 10, 15 * 60_000);
+  mailBudget(req);
   const r: any = await forgot(req.body?.email).catch((e) => {
     if (e instanceof HttpError && e.status === 429) return {}; // cooldown: stay quiet
     throw e;
@@ -43,9 +53,9 @@ authRouter.post('/forgot', handle(async (req) => {
   return { ok: true, message: 'If that email has an account, we have sent a code.', ...(config.otpDemo && r.demoCode ? { demoCode: r.demoCode } : {}) };
 }));
 
-authRouter.post('/reset', handle((req) => {
+authRouter.post('/reset', handle(async (req) => {
   rateLimit(`reset:${req.ip}`, 15, 15 * 60_000);
-  resetPassword(req.body?.email, req.body?.code, req.body?.newPassword);
+  await resetPassword(req.body?.email, req.body?.code, req.body?.newPassword);
   return { ok: true };
 }));
 
