@@ -132,7 +132,7 @@ export default function AuthScreen({ onAuthed }: { onAuthed: (user: User) => voi
       if (r.needsVerification) {
         setMode('verify');
         setDemoCode(r.demoCode ?? '');
-        setInfo('Please verify your email first. We have sent you a code.');
+        setInfo('Please verify your email first. We have sent you a code via Brevo.');
         setCooldown(30);
       } else finish(r);
     });
@@ -219,9 +219,23 @@ export default function AuthScreen({ onAuthed }: { onAuthed: (user: User) => voi
             </div>
           )}
           {demoCode && (mode === 'verify' || mode === 'reset') && (
-            <div className="notice demo" role="status">
-              <strong>Demo mode.</strong> No email service is connected, so the OTP is shown here: <b className="demo-code">{demoCode}</b>
-              <button type="button" className="link-btn" onClick={() => setCode(demoCode)}>Fill it for me</button>
+            <div className="notice demo" role="status" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <p style={{ margin: 0 }}>
+                <strong>OTP Dispatched!</strong> An email has been sent to your inbox. For fast testing and judging, your OTP is also shown below:
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '2px' }}>
+                <span className="demo-code" style={{ fontSize: '1.1rem', fontWeight: 'bold', letterSpacing: '3px' }}>
+                  {demoCode}
+                </span>
+                <button
+                  type="button"
+                  className="link-btn"
+                  style={{ fontWeight: 600, textDecoration: 'underline' }}
+                  onClick={() => setCode(demoCode)}
+                >
+                  Fill it for me
+                </button>
+              </div>
             </div>
           )}
 

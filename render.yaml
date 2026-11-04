@@ -31,7 +31,11 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
-      # Accounts. Demo mode shows the OTP on screen because no email service is connected.
+      # Database: a free Neon Postgres is recommended (Render's own free Postgres expires after 30 days).
+      # Without it, accounts and payments are lost whenever the free server sleeps.
+      - key: DATABASE_URL
+        sync: false
+      # Accounts. Keep OTP in demo mode (code shown on screen): Render's free plan blocks SMTP, so Gmail cannot send from here.
       - key: OTP_DEMO_MODE
         value: "true"
       - key: DEMO_ACCOUNT
