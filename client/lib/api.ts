@@ -1,5 +1,4 @@
-export const API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
-
+export const API = 'https://procureai-api-148w.onrender.com';
 // ---- types -------------------------------------------------------------------------------------------
 export interface User { id: string; email: string; name: string }
 export interface InventoryRow {
