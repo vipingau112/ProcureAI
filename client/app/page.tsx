@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import AgentTape from '@/components/AgentTape';
 import AuthScreen from '@/components/AuthScreen';
 import CurrencyPicker, { type Ccy } from '@/components/CurrencyPicker';
@@ -7,7 +8,10 @@ import { InventoryGrid, ProposalGrid } from '@/components/Grids';
 import { api, tokenStore, usd, type AppState, type Rates, type User } from '@/lib/api';
 import { formatMoney } from '@/lib/money';
 
-type Tab = 'queue' | 'inventory';
+// AG Studio only runs in the browser, so it is loaded on demand and never rendered on the server.
+const Insights = dynamic(() => import('@/components/Insights'), { ssr: false, loading: () => <p className="hint">Loading dashboard…</p> });
+
+type Tab = 'queue' | 'inventory' | 'insights';
 const CCY_KEY = 'procure_ccy';
 const PAYMENT_MESSAGES: Record<string, { text: string; bad?: boolean }> = {
   paid: { text: 'Payment complete! Press "Invoice" on the row to print your invoice.' },
@@ -243,6 +247,9 @@ export default function Home() {
             <button className="tab" role="tab" aria-selected={tab === 'inventory'} onClick={() => setTab('inventory')}>
               Inventory<span className="count">{low} low</span>
             </button>
+            <button className="tab" role="tab" aria-selected={tab === 'insights'} onClick={() => setTab('insights')}>
+              Insights
+            </button>
           </div>
 
           {tab === 'queue' && (
@@ -259,6 +266,8 @@ export default function Home() {
               <InventoryGrid rows={state.inventory} onEdit={setStock} />
             </>
           )}
+
+          {tab === 'insights' && state && <Insights proposals={state.proposals} />}
 
           <p className="fineprint">
             Your location is only used to work out your country (taken from your browser, rounded to about 10 km) and is never saved.{' '}

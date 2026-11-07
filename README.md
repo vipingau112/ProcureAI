@@ -61,6 +61,10 @@ After adding keys, run `npm run check` in `server/`. It tests each service and t
 
 To pay in the sandbox you need a sandbox **buyer** account from developer.paypal.com (Testing tools, Sandbox accounts). If PayPal says the seller does not accept your currency, make the sandbox buyer and seller accounts United States accounts.
 
+## Insights tab (AG Studio)
+
+The **Insights** tab is an [AG Studio](https://www.ag-grid.com/studio/) dashboard built from your proposals: spend by merchant, savings against list price, value by status and a table of everything. It shows sample data until the account has proposals, and **Customize dashboard** switches Studio into edit mode so you can add and rearrange widgets. It runs locally without a licence key. For a hosted site set `NEXT_PUBLIC_AG_STUDIO_LICENSE` (a free 45-day trial key) to remove the watermark.
+
 ## Deploy your own copy on Render
 
 `render.yaml` describes two web services: the API (`server/`) and the dashboard (`client/`). In Render choose **New, Blueprint**, connect this repository and fill in the prompted values. The two services need each other's address, so after the first deploy:
@@ -78,7 +82,7 @@ Use URLs without a trailing slash. On Render's free plan a service sleeps after 
 - **AI:** Gemini or Claude (tool calling)
 - **Payments:** PayPal Orders v2 REST API, sandbox
 - **Catalog:** Channel3 search API
-- **Dashboard:** Next.js, React, AG Grid Community
+- **Dashboard:** Next.js, React, AG Grid (queue and inventory tables), AG Studio (the Insights tab)
 - **Server:** Node.js, Express, TypeScript
 - **Exchange rates:** [Exchange Rate API](https://www.exchangerate-api.com) (open access)
 
@@ -94,7 +98,7 @@ Use URLs without a trailing slash. On Render's free plan a service sleeps after 
 
 ## What is next
 
-SMS OTP, merchant checkout integrations, PayPal webhooks for payment confirmation, normalised database tables with multi-instance support, and an AG Studio analytics dashboard.
+SMS OTP, merchant checkout integrations, PayPal webhooks for payment confirmation, and normalised database tables with multi-instance support.
 
 ## Project layout
 

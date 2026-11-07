@@ -56,3 +56,6 @@ services:
       # The API service URL (no trailing slash). Fill in after the first deploy, then redeploy this service.
       - key: NEXT_PUBLIC_API_URL
         sync: false
+      # AG Studio licence key (free 45-day trial). Baked in at build time, so redeploy after changing it.
+      - key: NEXT_PUBLIC_AG_STUDIO_LICENSE
+        sync: false

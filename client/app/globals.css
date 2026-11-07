@@ -176,6 +176,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .auth-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-top: 14px; }
 .auth-foot { margin: 16px 0 0; font-size: 12.5px; color: var(--ink-soft); text-align: center; }
 
+/* ---------- Insights (AG Studio) ---------- */
+.insights-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
+.insights-head .hint { margin: 0; }
+.insights-actions { display: flex; gap: 8px; }
+.insights-frame { height: 780px; border: 2px solid var(--rule); border-radius: 6px; background: var(--paper); overflow: hidden; }
+.insights-studio { height: 100%; width: 100%;
+  /* chart colours: marigold, rani pink, indigo, peacock green, violet, burnt orange */
+  --ag-chart-palette-fills-1-color: #f4a300; --ag-chart-palette-fills-2-color: #c2185b; --ag-chart-palette-fills-3-color: #1f1b4d;
+  --ag-chart-palette-fills-4-color: #00796b; --ag-chart-palette-fills-5-color: #7e57c2; --ag-chart-palette-fills-6-color: #e65100; }
+
 /* ---------- Invoice ---------- */
 .invoice-wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
 .invoice-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
