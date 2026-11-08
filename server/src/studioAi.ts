@@ -129,7 +129,7 @@ function brief(e: any): string {
  * "Gemini is writing a very long answer". Returns one merged, non-streamed-looking reply.
  */
 async function generateStreamed(ai: GoogleGenAI, args: any): Promise<any> {
-  const limit = Number(process.env.STUDIO_AI_TIMEOUT_MS) || 45000;
+  const limit = Number(process.env.STUDIO_AI_TIMEOUT_MS) || 30000;
   for (let attempt = 0; ; attempt++) {
     const began = Date.now();
     const prog = { chunks: 0, firstMs: -1 };
@@ -163,12 +163,34 @@ async function generateStreamed(ai: GoogleGenAI, args: any): Promise<any> {
     } catch (e: any) {
       if (DEBUG) console.log('[studio-ai] stream failed', JSON.stringify({ chunks: prog.chunks, firstMs: prog.firstMs, ms: Date.now() - began, error: String(e?.message ?? e).slice(0, 200) }));
       const retryable = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded/i.test(String(e?.message ?? e));
-      if (!retryable || attempt >= 2) throw e;
-      await sleep(3000 * 2 ** attempt);
+      throw e; // no same-model retry here: generateWithFallback moves on to the next model instead
     } finally {
       clearTimeout(timer);
     }
   }
+}
+
+const FALLBACK_ERR = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded|high demand|timeout|took longer/i;
+
+/** Tries each model in turn. Low thinking keeps the chat fast; a model that rejects that setting is retried without it. */
+async function generateWithFallback(ai: GoogleGenAI, models: string[], contents: any[], cfg: any, thinking: string): Promise<any> {
+  let lastErr: any;
+  for (const m of models) {
+    try {
+      try {
+        return await generateStreamed(ai, { model: m, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: thinking } } });
+      } catch (e: any) {
+        if (!/thinking/i.test(String(e?.message ?? e))) throw e;
+        if (DEBUG) console.log(`[studio-ai] ${m} does not accept thinkingLevel, retrying without it`);
+        return await generateStreamed(ai, { model: m, contents, config: cfg });
+      }
+    } catch (e: any) {
+      lastErr = e;
+      if (DEBUG) console.log(`[studio-ai] model ${m} failed: ${String(e?.message ?? e).replace(/\s+/g, ' ').slice(0, 160)}`);
+      if (!FALLBACK_ERR.test(String(e?.message ?? e))) throw e;
+    }
+  }
+  throw lastErr;
 }
 
 // Mounted behind requireAuth in index.ts, so req.user is set.
@@ -220,15 +242,11 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     const thinking = process.env.STUDIO_AI_THINKING || 'LOW'; // LOW | MINIMAL | MEDIUM | HIGH
     if (DEBUG) console.log('[studio-ai] system prompt', JSON.stringify({ head: systemText.slice(0, 700), tail: systemText.slice(-300) }));
     const t0 = Date.now();
-    let r: any;
-    try {
-      // Low thinking keeps the chat fast. If this model does not accept the setting, retry without it.
-      r = await generateStreamed(ai, { model, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: thinking } } });
-    } catch (e: any) {
-      if (!/thinking/i.test(String(e?.message ?? e))) throw e;
-      if (DEBUG) console.log('[studio-ai] thinkingLevel not accepted, retrying without it');
-      r = await generateStreamed(ai, { model, contents, config: cfg });
-    }
+    // Models to try in order. A busy or slow one (503, 429, timeout) hands over to the next instead of making the chat wait.
+    const models = [model, ...String(process.env.STUDIO_AI_FALLBACK_MODELS ?? 'gemini-flash-lite-latest').split(',')]
+      .map((m) => m.trim())
+      .filter((m, i, a) => m && a.indexOf(m) === i);
+    const r: any = await generateWithFallback(ai, models, contents, cfg, thinking);
     if (DEBUG) console.log('[studio-ai] gemini', JSON.stringify({ ms: Date.now() - t0, usage: r.usageMetadata, promptChars: JSON.stringify(contents).length + systemText.length }));
 
     const cand = r.candidates?.[0];
