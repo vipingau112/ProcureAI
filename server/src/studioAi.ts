@@ -75,8 +75,13 @@ function toGemini(input: any[] | undefined) {
         }
       }
       const part: any = { functionCall: { name: it.name, args: args ?? {} } };
+      // Gemini 3 insists on a signature for a function call. Use the saved one; if it was lost (server restarted, or a
+      // different model made the call), use Google's documented placeholder. Only the first call of a parallel batch needs one.
       const sig = signatures.get(id);
+      const prev = contents[contents.length - 1];
+      const afterCall = prev && prev.role === 'model' && prev.parts[prev.parts.length - 1]?.functionCall;
       if (sig) part.thoughtSignature = sig;
+      else if (!afterCall) part.thoughtSignature = 'skip_thought_signature_validator';
       push('model', part);
     } else if (type === 'function_call_output') {
       let out: any = it.output;
@@ -170,7 +175,7 @@ async function generateStreamed(ai: GoogleGenAI, args: any): Promise<any> {
   }
 }
 
-const FALLBACK_ERR = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded|high demand|timeout|took longer/i;
+const FALLBACK_ERR = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded|high demand|timeout|took longer|thought_signature/i;
 
 /** Tries each model in turn. Low thinking keeps the chat fast; a model that rejects that setting is retried without it. */
 async function generateWithFallback(ai: GoogleGenAI, models: string[], contents: any[], cfg: any, thinking: string): Promise<any> {
