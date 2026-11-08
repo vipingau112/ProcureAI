@@ -146,7 +146,10 @@ studioAiRouter.post('/turn', async (req: any, res) => {
       .map((t: any) => {
         const hasProps = Object.keys(t.parameters?.properties ?? {}).length > 0;
         // Same field the existing procurement agent already uses for its tool schemas.
-        return hasProps ? { name: t.name, description: t.description ?? '', parametersJsonSchema: t.parameters } : { name: t.name, description: t.description ?? '' };
+        // Trimmed to type/properties/required, exactly like the working procurement agent does for its own tools.
+        return hasProps
+          ? { name: t.name, description: t.description ?? '', parametersJsonSchema: { type: 'object', properties: t.parameters.properties, required: t.parameters.required ?? [] } }
+          : { name: t.name, description: t.description ?? '' };
       });
 
     const cfg: any = { temperature: 0.2 };
@@ -160,7 +163,17 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     if (/json/i.test(String(responseFormat?.type ?? ''))) cfg.responseMimeType = 'application/json';
 
     const ai = new GoogleGenAI({ apiKey: config.geminiKey });
-    const r: any = await generate(ai, { model: config.geminiModel, contents, config: cfg });
+    const t0 = Date.now();
+    let r: any;
+    try {
+      // Low thinking keeps the chat fast. If this model does not accept the setting, retry without it.
+      r = await generate(ai, { model: config.geminiModel, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: 'LOW' } } });
+    } catch (e: any) {
+      if (!/thinking/i.test(String(e?.message ?? e))) throw e;
+      if (DEBUG) console.log('[studio-ai] thinkingLevel not accepted, retrying without it');
+      r = await generate(ai, { model: config.geminiModel, contents, config: cfg });
+    }
+    if (DEBUG) console.log('[studio-ai] gemini', JSON.stringify({ ms: Date.now() - t0, usage: r.usageMetadata, promptChars: JSON.stringify(contents).length + systemText.length }));
 
     const cand = r.candidates?.[0];
     let text = '';
