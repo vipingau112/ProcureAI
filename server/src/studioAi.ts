@@ -101,7 +101,10 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function generate(ai: GoogleGenAI, args: any): Promise<any> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await ai.models.generateContent(args);
+      return await Promise.race([
+        ai.models.generateContent(args),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini took longer than 45s (timeout)')), 45000)),
+      ]);
     } catch (e: any) {
       const retryable = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded/i.test(String(e?.message ?? e));
       if (!retryable || attempt >= 2) throw e;
@@ -117,6 +120,7 @@ function brief(e: any): string {
   if (/503|UNAVAILABLE|overloaded|high demand/i.test(m)) return 'The AI service is busy. Please try again.';
   if (/401|403|API key|permission/i.test(m)) return 'AI key problem on the server.';
   if (/400|INVALID_ARGUMENT/i.test(m)) return `The AI rejected the request: ${m.replace(/\s+/g, ' ').slice(0, 200)}`;
+  if (/timeout/i.test(m)) return 'The AI took too long to answer. Please try again.';
   return 'The AI request failed.';
 }
 
@@ -173,6 +177,7 @@ studioAiRouter.post('/turn', async (req: any, res) => {
         text += p.text;
       }
     }
+    if (DEBUG) console.log('[studio-ai] reply', JSON.stringify({ finish: cand?.finishReason, text: text.slice(0, 300), toolCalls }).slice(0, 2000));
     if (!text && !toolCalls.length) {
       const why = cand?.finishReason ?? r.promptFeedback?.blockReason ?? 'empty reply';
       return res.status(502).json({ error: `The AI returned nothing (${why}).` });
