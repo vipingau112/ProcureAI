@@ -6,7 +6,7 @@ ProcureAI watches your inventory, or takes a request like "2 wireless keyboards 
 
 Built for the PayPal AI Hackathon.
 
-- **Live demo:** `[ADD YOUR HOSTED URL]` (click **Log in as demo**, no signup or OTP needed)
+- **Live demo:** `https://procureai-web-vlew.onrender.com` (click **Log in as demo**, no signup or OTP needed)
 - **Demo video:** `[ADD YOUR YOUTUBE LINK]`
 
 ## How it works
