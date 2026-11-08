@@ -64,7 +64,7 @@ function toGemini(input: any[] | undefined) {
       if (it.role === 'system' || it.role === 'developer') system.push(text);
       else push(it.role === 'assistant' || it.role === 'model' ? 'model' : 'user', { text });
     } else if (type === 'function_call') {
-      const id = it.call_id || it.id;
+      const id = it.call_id || it.callId || it.id;
       names[id] = it.name;
       let args = it.arguments;
       if (typeof args === 'string') {
@@ -93,7 +93,7 @@ function toGemini(input: any[] | undefined) {
         }
       }
       if (out === null || typeof out !== 'object' || Array.isArray(out)) out = { result: out };
-      push('user', { functionResponse: { name: names[it.call_id] || it.name || 'tool', response: out } });
+      push('user', { functionResponse: { name: names[it.call_id ?? it.callId] || it.name || 'tool', response: out } });
     } else if (DEBUG) {
       console.log('[studio-ai] skipped item', JSON.stringify(it).slice(0, 200));
     }
@@ -222,7 +222,7 @@ studioAiRouter.post('/turn', async (req: any, res) => {
         // Same field the existing procurement agent already uses for its tool schemas.
         // Trimmed to type/properties/required, exactly like the working procurement agent does for its own tools.
         return hasProps
-          ? { name: t.name, description: t.description ?? '', parametersJsonSchema: { type: 'object', properties: t.parameters.properties, required: t.parameters.required ?? [] } }
+          ? { name: t.name, description: t.description ?? '', parametersJsonSchema: { type: 'object', properties: t.parameters.properties, required: t.parameters.required ?? [], ...(t.parameters.$defs ? { $defs: t.parameters.$defs } : {}), ...(t.parameters.definitions ? { definitions: t.parameters.definitions } : {}) } }
           : { name: t.name, description: t.description ?? '' };
       });
 
