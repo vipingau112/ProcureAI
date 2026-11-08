@@ -9,3 +9,5 @@ dist/
 data/
 # backups made by the update installers
 _backup_before_update*/
+
+*.tsbuildinfo

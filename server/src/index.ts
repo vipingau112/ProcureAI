@@ -2,6 +2,7 @@ import cors from 'cors';
 import express from 'express';
 import { newRunId, runAgent } from './agent/procurementAgent';
 import { requireAuth } from './auth/middleware';
+import { studioAiRouter } from './studioAi';
 import { authRouter } from './auth/routes';
 import { ensureDemoUser, initAuth } from './auth/users';
 import { config, modes } from './config';
@@ -14,6 +15,8 @@ import { findByOrderId, findByProposalId, flushUser, initStores, round2, runWith
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: config.clientUrl })); // tokens travel in the Authorization header, so no cookies are needed
+// Insights AI chat: Studio sends the whole conversation and tool list each turn, which is bigger than the 50kb default below.
+app.use('/api/studio-ai', express.json({ limit: '2mb' }), requireAuth, studioAiRouter);
 app.use(express.json({ limit: '50kb' }));
 
 // ===== Public routes (no login) ==============================================================
