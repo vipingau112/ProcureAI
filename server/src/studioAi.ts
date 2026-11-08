@@ -163,15 +163,21 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     if (/json/i.test(String(responseFormat?.type ?? ''))) cfg.responseMimeType = 'application/json';
 
     const ai = new GoogleGenAI({ apiKey: config.geminiKey });
+    // Diagnostics: STUDIO_AI_PROBE = plain | notools | nosystem trims the request; STUDIO_AI_MODEL swaps the model. Unset = normal.
+    const probe = String(process.env.STUDIO_AI_PROBE ?? '');
+    const model = process.env.STUDIO_AI_MODEL || config.geminiModel;
+    if (probe === 'notools' || probe === 'plain') { delete cfg.tools; delete cfg.toolConfig; }
+    if (probe === 'nosystem' || probe === 'plain') delete cfg.systemInstruction;
+    if (DEBUG) console.log('[studio-ai] calling gemini', JSON.stringify({ probe, model, contentsChars: JSON.stringify(contents).length, systemChars: systemText.length, toolsChars: JSON.stringify(functionDeclarations).length, tools: functionDeclarations.length }));
     const t0 = Date.now();
     let r: any;
     try {
       // Low thinking keeps the chat fast. If this model does not accept the setting, retry without it.
-      r = await generate(ai, { model: config.geminiModel, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: 'LOW' } } });
+      r = await generate(ai, { model, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: 'LOW' } } });
     } catch (e: any) {
       if (!/thinking/i.test(String(e?.message ?? e))) throw e;
       if (DEBUG) console.log('[studio-ai] thinkingLevel not accepted, retrying without it');
-      r = await generate(ai, { model: config.geminiModel, contents, config: cfg });
+      r = await generate(ai, { model, contents, config: cfg });
     }
     if (DEBUG) console.log('[studio-ai] gemini', JSON.stringify({ ms: Date.now() - t0, usage: r.usageMetadata, promptChars: JSON.stringify(contents).length + systemText.length }));
 
