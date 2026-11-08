@@ -124,6 +124,53 @@ function brief(e: any): string {
   return 'The AI request failed.';
 }
 
+/**
+ * Streams the reply so the log shows WHEN the first chunk arrives. That tells "Gemini never started" apart from
+ * "Gemini is writing a very long answer". Returns one merged, non-streamed-looking reply.
+ */
+async function generateStreamed(ai: GoogleGenAI, args: any): Promise<any> {
+  const limit = Number(process.env.STUDIO_AI_TIMEOUT_MS) || 45000;
+  for (let attempt = 0; ; attempt++) {
+    const began = Date.now();
+    const prog = { chunks: 0, firstMs: -1 };
+    let timer: any;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Gemini took longer than ${limit / 1000}s (timeout)`)), limit);
+    });
+    const run = async () => {
+      const parts: any[] = [];
+      let finishReason: any;
+      let usageMetadata: any;
+      let modelVersion: any;
+      const stream: any = await ai.models.generateContentStream(args);
+      for await (const chunk of stream) {
+        prog.chunks++;
+        if (prog.firstMs < 0) {
+          prog.firstMs = Date.now() - began;
+          if (DEBUG) console.log(`[studio-ai] first chunk after ${prog.firstMs}ms`);
+        }
+        const cand = chunk.candidates?.[0];
+        for (const p of cand?.content?.parts ?? []) parts.push(p);
+        if (cand?.finishReason) finishReason = cand.finishReason;
+        if (chunk.usageMetadata) usageMetadata = chunk.usageMetadata;
+        if (chunk.modelVersion) modelVersion = chunk.modelVersion;
+      }
+      if (DEBUG) console.log('[studio-ai] stream done', JSON.stringify({ chunks: prog.chunks, firstMs: prog.firstMs, totalMs: Date.now() - began }));
+      return { candidates: [{ content: { parts }, finishReason }], usageMetadata, modelVersion };
+    };
+    try {
+      return await Promise.race([run(), timeout]);
+    } catch (e: any) {
+      if (DEBUG) console.log('[studio-ai] stream failed', JSON.stringify({ chunks: prog.chunks, firstMs: prog.firstMs, ms: Date.now() - began, error: String(e?.message ?? e).slice(0, 200) }));
+      const retryable = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded/i.test(String(e?.message ?? e));
+      if (!retryable || attempt >= 2) throw e;
+      await sleep(3000 * 2 ** attempt);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
 // Mounted behind requireAuth in index.ts, so req.user is set.
 studioAiRouter.post('/turn', async (req: any, res) => {
   try {
@@ -169,15 +216,18 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     if (probe === 'notools' || probe === 'plain') { delete cfg.tools; delete cfg.toolConfig; }
     if (probe === 'nosystem' || probe === 'plain') delete cfg.systemInstruction;
     if (DEBUG) console.log('[studio-ai] calling gemini', JSON.stringify({ probe, model, contentsChars: JSON.stringify(contents).length, systemChars: systemText.length, toolsChars: JSON.stringify(functionDeclarations).length, tools: functionDeclarations.length }));
+    cfg.maxOutputTokens = Number(process.env.STUDIO_AI_MAX_TOKENS) || 4096;
+    const thinking = process.env.STUDIO_AI_THINKING || 'LOW'; // LOW | MINIMAL | MEDIUM | HIGH
+    if (DEBUG) console.log('[studio-ai] system prompt', JSON.stringify({ head: systemText.slice(0, 700), tail: systemText.slice(-300) }));
     const t0 = Date.now();
     let r: any;
     try {
       // Low thinking keeps the chat fast. If this model does not accept the setting, retry without it.
-      r = await generate(ai, { model, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: 'LOW' } } });
+      r = await generateStreamed(ai, { model, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: thinking } } });
     } catch (e: any) {
       if (!/thinking/i.test(String(e?.message ?? e))) throw e;
       if (DEBUG) console.log('[studio-ai] thinkingLevel not accepted, retrying without it');
-      r = await generate(ai, { model, contents, config: cfg });
+      r = await generateStreamed(ai, { model, contents, config: cfg });
     }
     if (DEBUG) console.log('[studio-ai] gemini', JSON.stringify({ ms: Date.now() - t0, usage: r.usageMetadata, promptChars: JSON.stringify(contents).length + systemText.length }));
 
