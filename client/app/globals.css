@@ -180,7 +180,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .insights-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin-bottom: 10px; }
 .insights-head .hint { margin: 0; }
 .insights-actions { display: flex; gap: 8px; }
-.insights-frame { height: 780px; border: 2px solid var(--rule); border-radius: 6px; background: var(--paper); overflow: hidden; }
+.insights-frame { height: clamp(780px, calc(100vh - 170px), 1200px); border: 2px solid var(--rule); border-radius: 6px; background: var(--paper); overflow: hidden; }
+.insights-frame.editing { height: clamp(900px, calc(100vh - 110px), 1400px); }
 .insights-studio { height: 100%; width: 100%;
   /* chart colours: marigold, rani pink, indigo, peacock green, violet, burnt orange */
   --ag-chart-palette-fills-1-color: #f4a300; --ag-chart-palette-fills-2-color: #c2185b; --ag-chart-palette-fills-3-color: #1f1b4d;

@@ -46,7 +46,7 @@ const textOf = (content: any): string =>
  * THE GUESSED PART: the field names below come from the docs' wording, not from a spec I could read.
  * If the agent answers but never acts, run with STUDIO_AI_DEBUG=true and look at what arrives.
  */
-function toGemini(input: any[] | undefined) {
+function toGemini(input: any[] | undefined, useSignatures = true) {
   const names: Record<string, string> = {}; // call_id -> tool name
   const contents: { role: string; parts: any[] }[] = [];
   const system: string[] = [];
@@ -77,7 +77,8 @@ function toGemini(input: any[] | undefined) {
       const part: any = { functionCall: { name: it.name, args: args ?? {} } };
       // Gemini 3 insists on a signature for a function call. Use the saved one; if it was lost (server restarted, or a
       // different model made the call), use Google's documented placeholder. Only the first call of a parallel batch needs one.
-      const sig = signatures.get(id);
+      // A signature is only valid for the model that produced it, so a fallback model gets the placeholder instead.
+      const sig = useSignatures ? signatures.get(id) : undefined;
       const prev = contents[contents.length - 1];
       const afterCall = prev && prev.role === 'model' && prev.parts[prev.parts.length - 1]?.functionCall;
       if (sig) part.thoughtSignature = sig;
@@ -100,6 +101,18 @@ function toGemini(input: any[] | undefined) {
   }
   return { contents, system };
 }
+
+/**
+ * Extra context appended to Studio's own system prompt. It keeps the assistant from piling up duplicate widgets and
+ * tells it what the data is, without touching Studio's tool-calling rules.
+ */
+const PROJECT_NOTE = [
+  'Project context: this dashboard shows procurement proposals made by an AI buyer (ProcureAI). All money values are in USD.',
+  'Before adding a chart, table or KPI, read the current page. If an equivalent widget already exists (same chart type and same fields),',
+  'say so and offer to change it instead of adding a duplicate, unless the user clearly asks for another one.',
+  'When you do add a widget, place it in free space below the existing widgets and give it a clear title.',
+  'Reply in the language the user wrote in, in one or two short sentences.',
+].join(' ');
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -178,16 +191,17 @@ async function generateStreamed(ai: GoogleGenAI, args: any): Promise<any> {
 const FALLBACK_ERR = /429|RESOURCE_EXHAUSTED|503|UNAVAILABLE|overloaded|high demand|timeout|took longer|thought_signature/i;
 
 /** Tries each model in turn. Low thinking keeps the chat fast; a model that rejects that setting is retried without it. */
-async function generateWithFallback(ai: GoogleGenAI, models: string[], contents: any[], cfg: any, thinking: string): Promise<any> {
+async function generateWithFallback(ai: GoogleGenAI, models: string[], contents: any[], cfg: any, thinking: string, fallbackContents: any[] = contents): Promise<any> {
   let lastErr: any;
-  for (const m of models) {
+  for (const [idx, m] of models.entries()) {
+    const body = idx === 0 ? contents : fallbackContents; // fallback models must not receive the first model's thought signatures
     try {
       try {
-        return await generateStreamed(ai, { model: m, contents, config: { ...cfg, thinkingConfig: { thinkingLevel: thinking } } });
+        return await generateStreamed(ai, { model: m, contents: body, config: { ...cfg, thinkingConfig: { thinkingLevel: thinking } } });
       } catch (e: any) {
         if (!/thinking/i.test(String(e?.message ?? e))) throw e;
         if (DEBUG) console.log(`[studio-ai] ${m} does not accept thinkingLevel, retrying without it`);
-        return await generateStreamed(ai, { model: m, contents, config: cfg });
+        return await generateStreamed(ai, { model: m, contents: body, config: cfg });
       }
     } catch (e: any) {
       lastErr = e;
@@ -213,7 +227,8 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     }
 
     const { contents, system } = toGemini(input);
-    const systemText = [instructions, ...system].filter(Boolean).join('\n\n');
+    const fallbackContents = toGemini(input, false).contents;
+    const systemText = [instructions, ...system, PROJECT_NOTE].filter(Boolean).join('\n\n');
 
     const functionDeclarations = (tools ?? [])
       .filter((t: any) => t.kind !== 'provided')
@@ -251,7 +266,7 @@ studioAiRouter.post('/turn', async (req: any, res) => {
     const models = [model, ...String(process.env.STUDIO_AI_FALLBACK_MODELS ?? 'gemini-flash-lite-latest').split(',')]
       .map((m) => m.trim())
       .filter((m, i, a) => m && a.indexOf(m) === i);
-    const r: any = await generateWithFallback(ai, models, contents, cfg, thinking);
+    const r: any = await generateWithFallback(ai, models, contents, cfg, thinking, fallbackContents);
     if (DEBUG) console.log('[studio-ai] gemini', JSON.stringify({ ms: Date.now() - t0, usage: r.usageMetadata, promptChars: JSON.stringify(contents).length + systemText.length }));
 
     const cand = r.candidates?.[0];

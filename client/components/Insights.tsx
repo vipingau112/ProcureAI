@@ -4,7 +4,7 @@ import { AgStudio, AgStudioProvider } from 'ag-studio-react';
 import { useMemo, useState } from 'react';
 import type { ProposalRow } from '@/lib/api';
 import { geminiProxyAdapter } from '@/lib/geminiProxyAdapter';
-import { buildData, buildInitialState, sampleRows, toInsightRows } from '@/lib/insights';
+import { buildData, buildInitialState, sampleRows, toInsightRows, type InsightRow } from '@/lib/insights';
 
 if (process.env.NODE_ENV !== 'production') enableStudioDevValidations(); // extra checks while developing
 
@@ -20,7 +20,11 @@ const Studio: any = AgStudio;
 const Provider: any = AgStudioProvider;
 
 export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
-  const real = useMemo(() => toInsightRows(proposals), [proposals]);
+  // The page refreshes /api/state every 1.5 s, which hands us a brand-new `proposals` array each time even when nothing
+  // changed. Passing a new `data` object to Studio that often re-ingests the data and can interrupt the AI agent while it
+  // is building a widget. So compare by content: `real` only gets a new identity when a proposal really changed.
+  const realSig = JSON.stringify(toInsightRows(proposals));
+  const real = useMemo(() => JSON.parse(realSig) as InsightRow[], [realSig]);
   const [sample, setSample] = useState<boolean | null>(null); // null = decide automatically
   const [mode, setMode] = useState<'view' | 'edit'>('view');
   const useSample = sample ?? real.length === 0;
@@ -87,7 +91,7 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
           </button>
         </div>
       </div>
-      <div className="insights-frame">{LICENSE ? <Provider licenseKey={LICENSE}>{studio}</Provider> : studio}</div>
+      <div className={`insights-frame${mode === 'edit' ? ' editing' : ''}`}>{LICENSE ? <Provider licenseKey={LICENSE}>{studio}</Provider> : studio}</div>
     </section>
   );
 }
