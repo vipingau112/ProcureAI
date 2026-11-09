@@ -93,14 +93,26 @@ function SavingsMeter({ dataMapping, widgetApi }: any) {
   );
 }
 
+// Shaped exactly like AG Studio's documented custom widget example: data mapping with `requires`, a `form`, sizes and AI text.
 export const savingsMeterWidget: any = {
   id: 'savings-meter',
+  icon: { url: 'https://www.ag-grid.com/studio/images/brandmark.svg' },
   label: 'Savings meter',
-  icon: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="9" width="18" height="6" rx="3"/><path d="M3 12h10" stroke-width="6"/></svg>',
   dataMapping: {
-    saved: { type: 'field', supportedRoles: ['numeric'], required: true, aiDescription: 'Numeric field with the amount saved versus list price.' },
-    spent: { type: 'field', supportedRoles: ['numeric'], required: true, aiDescription: 'Numeric field with the amount actually paid.' },
+    saved: { type: 'field', supportedRoles: ['numeric'], requires: { cardinality: 'one' }, required: true },
+    spent: { type: 'field', supportedRoles: ['numeric'], requires: { cardinality: 'one' }, required: true },
   },
+  form: (params: any) =>
+    params.createDefaults({
+      dataMappingItems: [
+        { key: 'saved', label: 'Saved vs list price' },
+        { key: 'spent', label: 'Amount paid' },
+      ],
+    }),
   comp: SavingsMeter,
+  defaultSize: { width: 400, height: 200 },
   minSize: { width: 200, height: 100 },
+  ai: {
+    description: 'Shows what share of the list price was saved, from an amount-saved field and an amount-paid field.',
+  },
 };
