@@ -1,6 +1,7 @@
 'use client';
 import { AgStudioAiModule, AgStudioModuleRegistry, createAiHarness, studioTheme, enableStudioDevValidations } from 'ag-studio';
-import { AgStudio, AgStudioProvider } from 'ag-studio-react';
+import { AgStudio, AgStudioProvider, createWidgets } from 'ag-studio-react';
+import { savingsMeterWidget } from '@/lib/savingsMeter';
 import { useMemo, useState } from 'react';
 import type { ProposalRow } from '@/lib/api';
 import { geminiProxyAdapter } from '@/lib/geminiProxyAdapter';
@@ -12,6 +13,8 @@ const LICENSE = process.env.NEXT_PUBLIC_AG_STUDIO_LICENSE || '';
 
 // Studio Agent Framework (chat panel). Off by default: set NEXT_PUBLIC_STUDIO_AI=true and redeploy the web service to turn it on.
 const STUDIO_AI = process.env.NEXT_PUBLIC_STUDIO_AI === 'true';
+// Custom widget (Savings meter). Off by default: set NEXT_PUBLIC_CUSTOM_WIDGET=true and redeploy the web service to turn it on.
+const CUSTOM_WIDGET = process.env.NEXT_PUBLIC_CUSTOM_WIDGET === 'true';
 if (STUDIO_AI) AgStudioModuleRegistry.registerModules([AgStudioAiModule]);
 
 // Studio's prop types are very strict (for example field formats must be exact literals) and it validates its input at
@@ -32,7 +35,7 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
 
   const data: any = useMemo(() => buildData(rows), [rows]);
   // Typed loosely on purpose: Studio validates the state at runtime and reports problems in the console.
-  const initialState: any = useMemo(() => buildInitialState(), []);
+  const initialState: any = useMemo(() => buildInitialState(CUSTOM_WIDGET), []);
   // Without the flag there is no `ai` prop, so there is no chat panel and the page is exactly as before.
   const ai: any = useMemo(() => {
     if (!STUDIO_AI) return undefined;
@@ -46,6 +49,18 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
         ],
       });
   }, []);
+  // Without the flag no `widgets` prop is passed, so Studio keeps its normal widget set.
+  const widgets: any = useMemo(
+    () =>
+      CUSTOM_WIDGET
+        ? (widgetConfig: any) =>
+            (createWidgets as any)({
+              additionalTypes: [savingsMeterWidget],
+              menu: [...widgetConfig.menu, { label: 'ProcureAI', widgetIds: ['savings-meter'] }],
+            })
+        : undefined,
+    [],
+  );
   const theme = useMemo(
     () =>
       studioTheme.withParams({
@@ -68,6 +83,7 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
         mode={mode}
         theme={theme}
         ai={ai}
+        widgets={widgets}
       />
     </div>
   );

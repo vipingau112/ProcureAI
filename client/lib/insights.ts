@@ -114,7 +114,7 @@ export function buildData(rows: InsightRow[]) {
 }
 
 /** A ready-made first page: three KPIs, two charts and a grid. Users can edit it in Studio's edit mode. */
-export function buildInitialState() {
+export function buildInitialState(withSavingsMeter = false) {
   const kpi = (id: string, aggregation: string, caption: string) => ({
     type: 'value',
     dataMapping: { value: [{ id, aggregation }] },
@@ -134,6 +134,9 @@ export function buildInitialState() {
           'kpi-total': kpi('orders.total', 'sum', 'Total value of proposals (USD)'),
           'kpi-saved': kpi('orders.savings', 'sum', 'Saved vs list price (USD)'),
           'kpi-count': kpi('orders.id', 'countd', 'Proposals'),
+          ...(withSavingsMeter
+            ? { 'savings-meter': { type: 'savings-meter', dataMapping: { saved: [{ id: 'orders.savings', aggregation: 'sum' }], spent: [{ id: 'orders.total', aggregation: 'sum' }] } } }
+            : {}),
           'by-merchant': bar('orders.merchant', 'Spend by merchant (USD)'),
           'by-status': bar('orders.status', 'Value by status (USD)'),
           'all-proposals': {
@@ -148,9 +151,10 @@ export function buildInitialState() {
           'kpi-total': { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 6 },
           'kpi-saved': { xTrack: 8, yTrack: 0, xSpan: 8, ySpan: 6 },
           'kpi-count': { xTrack: 16, yTrack: 0, xSpan: 8, ySpan: 6 },
-          'by-merchant': { xTrack: 0, yTrack: 6, xSpan: 12, ySpan: 16 },
-          'by-status': { xTrack: 12, yTrack: 6, xSpan: 12, ySpan: 16 },
-          'all-proposals': { xTrack: 0, yTrack: 22, xSpan: 24, ySpan: 16 },
+          ...(withSavingsMeter ? { 'savings-meter': { xTrack: 0, yTrack: 6, xSpan: 24, ySpan: 6 } } : {}),
+          'by-merchant': { xTrack: 0, yTrack: withSavingsMeter ? 12 : 6, xSpan: 12, ySpan: 16 },
+          'by-status': { xTrack: 12, yTrack: withSavingsMeter ? 12 : 6, xSpan: 12, ySpan: 16 },
+          'all-proposals': { xTrack: 0, yTrack: withSavingsMeter ? 28 : 22, xSpan: 24, ySpan: 16 },
         },
       },
     ],
