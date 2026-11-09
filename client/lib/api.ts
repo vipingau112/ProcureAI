@@ -1,4 +1,13 @@
-export const API = 'https://procureai-api-148w.onrender.com';
+// API address: NEXT_PUBLIC_API_URL if it is set (the Render build), else the local server when the page runs on
+// localhost, else the hosted API. Before this, the hosted address was hardcoded, so a local client never reached a local server.
+const HOSTED_API = 'https://procureai-api-148w.onrender.com';
+function pickApi(): string {
+  const env = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/+$/, '');
+  if (env) return env;
+  if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) return 'http://localhost:5000';
+  return HOSTED_API;
+}
+export const API = pickApi();
 // ---- types -------------------------------------------------------------------------------------------
 export interface User { id: string; email: string; name: string }
 export interface InventoryRow {

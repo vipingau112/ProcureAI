@@ -2,10 +2,11 @@
 import { AgStudioAiModule, AgStudioModuleRegistry, createAiHarness, studioTheme, enableStudioDevValidations } from 'ag-studio';
 import { AgStudio, AgStudioProvider, createWidgets } from 'ag-studio-react';
 import { savingsMeterWidget } from '@/lib/savingsMeter';
-import { useMemo, useState } from 'react';
+import { Component, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import type { ProposalRow } from '@/lib/api';
 import { geminiProxyAdapter } from '@/lib/geminiProxyAdapter';
 import { buildData, buildInitialState, sampleRows, toInsightRows, type InsightRow } from '@/lib/insights';
+import { setInsightRows } from '@/lib/insightsStore';
 
 if (process.env.NODE_ENV !== 'production') enableStudioDevValidations(); // extra checks while developing
 
@@ -22,6 +23,21 @@ if (STUDIO_AI) AgStudioModuleRegistry.registerModules([AgStudioAiModule]);
 const Studio: any = AgStudio;
 const Provider: any = AgStudioProvider;
 
+/** If Studio rejects the custom widget and crashes, drop the widget and show the plain dashboard instead of a dead tab. */
+class StudioBoundary extends Component<{ onError: () => void; fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(err: unknown) {
+    console.error('[insights] AG Studio crashed:', err);
+    this.props.onError();
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
 export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
   // The page refreshes /api/state every 1.5 s, which hands us a brand-new `proposals` array each time even when nothing
   // changed. Passing a new `data` object to Studio that often re-ingests the data and can interrupt the AI agent while it
@@ -35,7 +51,10 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
 
   const data: any = useMemo(() => buildData(rows), [rows]);
   // Typed loosely on purpose: Studio validates the state at runtime and reports problems in the console.
-  const initialState: any = useMemo(() => buildInitialState(CUSTOM_WIDGET), []);
+  const [customOk, setCustomOk] = useState(CUSTOM_WIDGET); // flips to false if Studio crashes with the custom widget
+  const initialState: any = useMemo(() => buildInitialState(customOk), [customOk]);
+  // The custom widget can read the same rows as the dashboard (used as a fallback if its own query is slow).
+  useLayoutEffect(() => setInsightRows(rows), [rows]);
   // Without the flag there is no `ai` prop, so there is no chat panel and the page is exactly as before.
   const ai: any = useMemo(() => {
     if (!STUDIO_AI) return undefined;
@@ -52,14 +71,14 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
   // Without the flag no `widgets` prop is passed, so Studio keeps its normal widget set.
   const widgets: any = useMemo(
     () =>
-      CUSTOM_WIDGET
+      customOk
         ? (widgetConfig: any) =>
             (createWidgets as any)({
               additionalTypes: [savingsMeterWidget],
               menu: [...widgetConfig.menu, { label: 'ProcureAI', widgetIds: ['savings-meter'] }],
             })
         : undefined,
-    [],
+    [customOk],
   );
   const theme = useMemo(
     () =>
@@ -76,15 +95,13 @@ export default function Insights({ proposals }: { proposals: ProposalRow[] }) {
 
   const studio = (
     <div className="insights-studio">
-      <Studio
-        key={useSample ? 'sample' : 'real'} // start fresh when switching data
-        data={data}
-        initialState={initialState}
-        mode={mode}
-        theme={theme}
-        ai={ai}
-        widgets={widgets}
-      />
+      <StudioBoundary
+        key={`${useSample ? 'sample' : 'real'}-${customOk ? 'custom' : 'plain'}`} // start fresh when switching data
+        onError={() => setCustomOk(false)}
+        fallback={<p className="hint">The dashboard could not load. Press F12 and check the Console for the reason.</p>}
+      >
+        <Studio data={data} initialState={initialState} mode={mode} theme={theme} ai={ai} widgets={widgets} />
+      </StudioBoundary>
     </div>
   );
 

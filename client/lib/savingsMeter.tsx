@@ -1,13 +1,18 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { getInsightRows, subscribeInsightRows } from './insightsStore';
 
 /**
  * Savings meter: a custom AG Studio widget for ProcureAI.
  * It maps two numeric fields (amount saved vs list price, amount paid) and shows how much of the list price was saved.
  * Registered in Insights.tsx only when NEXT_PUBLIC_CUSTOM_WIDGET=true.
+ *
+ * It never leaves Studio stuck on its loading spinner: the query result is used when it arrives, and if it is slow
+ * (6 s) or comes back in an unexpected shape, the widget falls back to the rows the dashboard already holds.
  */
 
 type FieldRef = { id: string; aggregation?: string };
+type Totals = { saved: number; spent: number; savedText?: string; spentText?: string };
 
 // A response row may be an array or an object depending on the data engine, so read it defensively.
 function cell(row: any, field: FieldRef, index: number): unknown {
@@ -16,59 +21,71 @@ function cell(row: any, field: FieldRef, index: number): unknown {
   return row;
 }
 
-let loggedShape = false;
+const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+  new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(null), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
 
 function SavingsMeter({ dataMapping, widgetApi }: any) {
   const saved: FieldRef | undefined = dataMapping?.saved?.[0];
   const spent: FieldRef | undefined = dataMapping?.spent?.[0];
-  const [view, setView] = useState<{ savedText: string; spentText: string; pct: number } | null>(null);
-  const hasLoaded = useRef(false);
+  // Studio may hand over a new dataMapping object on every render. Depend on its content, not its identity, or the effect
+  // below restarts forever and each query is replaced by the next one before it ever finishes.
+  const mappingKey = JSON.stringify([saved ?? null, spent ?? null]);
+  const apiRef = useRef(widgetApi);
+  apiRef.current = widgetApi;
+  const run = useRef(0);
+  const [fromQuery, setFromQuery] = useState<Totals | null>(null);
+  const rows = useSyncExternalStore(subscribeInsightRows, getInsightRows, getInsightRows);
 
   useEffect(() => {
-    let cancelled = false;
+    const api = apiRef.current;
+    const mine = ++run.current;
+    const stale = () => mine !== run.current;
     if (!saved || !spent) {
-      widgetApi.setDisplayState('incompleteDataMapping');
-      return;
+      api.setDisplayState('incompleteDataMapping');
+      return () => { run.current++; };
     }
     (async () => {
       try {
-        widgetApi.setDisplayState('loading', { prominent: !hasLoaded.current });
-        const response = await widgetApi.getData({ fields: [saved, spent] }, { queryId: 'savings-meter' });
-        if (cancelled || response?.replaced) return;
+        api.setDisplayState('loading', { prominent: false }); // a slow query must never hide the widget
+        const response: any = await withTimeout(api.getData({ fields: [saved, spent] }), 6000);
+        if (stale()) return;
         const row = response?.results?.rows?.[0];
-        if (!loggedShape) {
-          loggedShape = true;
-          console.debug('[savings-meter] first data row', row);
-        }
         const s = Number(cell(row, saved, 0));
         const p = Number(cell(row, spent, 1));
-        if (!row || !Number.isFinite(s) || !Number.isFinite(p)) {
-          widgetApi.setDisplayState('noData');
-          return;
+        if (row && Number.isFinite(s) && Number.isFinite(p)) {
+          const fmt = (f: FieldRef, v: number) => {
+            try { return String(api.formatFieldValue(f, v)); } catch { return usd(v); }
+          };
+          setFromQuery({ saved: s, spent: p, savedText: fmt(saved, s), spentText: fmt(spent, p) });
+        } else {
+          console.warn('[savings-meter] no usable query result, using the dashboard rows instead', response);
+          setFromQuery(null);
         }
-        const listTotal = s + p; // list price total = what was paid + what was saved
-        const pct = listTotal > 0 ? Math.min(100, Math.max(0, (s / listTotal) * 100)) : 0;
-        const fmt = (f: FieldRef, v: number) => {
-          try {
-            return String(widgetApi.formatFieldValue(f, v));
-          } catch {
-            return v.toFixed(2);
-          }
-        };
-        hasLoaded.current = true;
-        setView({ savedText: fmt(saved, s), spentText: fmt(spent, p), pct });
-        widgetApi.setDisplayState('displayed');
       } catch (e) {
-        console.warn('[savings-meter] could not load data', e);
-        if (!cancelled) widgetApi.setDisplayState('noData');
+        if (stale()) return;
+        console.warn('[savings-meter] query failed, using the dashboard rows instead', e);
+        setFromQuery(null);
+      } finally {
+        if (!stale()) api.setDisplayState('displayed'); // always leave the loading state
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [widgetApi, dataMapping]);
+    return () => { run.current++; };
+  }, [mappingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!view) return null;
+  const totals: Totals | null = useMemo(() => {
+    if (fromQuery) return fromQuery;
+    if (!rows.length) return null;
+    return { saved: rows.reduce((a, r) => a + r.savings, 0), spent: rows.reduce((a, r) => a + r.total, 0) };
+  }, [fromQuery, rows]);
+
+  if (!totals) return <div style={{ padding: '10px 18px', fontSize: 13, opacity: 0.7 }}>No data yet.</div>;
+  const listTotal = totals.saved + totals.spent; // list price total = what was paid + what was saved
+  const pct = listTotal > 0 ? Math.min(100, Math.max(0, (totals.saved / listTotal) * 100)) : 0;
+  const view = { pct, savedText: totals.savedText ?? usd(totals.saved), spentText: totals.spentText ?? usd(totals.spent) };
   const accent = 'var(--ag-accent-color, #c2185b)';
   return (
     <div style={{ height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, padding: '10px 18px' }}>
