@@ -7,7 +7,7 @@ ProcureAI watches your inventory, or takes a request like "2 wireless keyboards 
 Built for the PayPal AI Hackathon.
 
 - **Live demo:** `https://procureai-web-vlew.onrender.com` (click **Log in as demo**, no signup or OTP needed)
-- **Demo video:** `[ADD YOUR YOUTUBE LINK]`
+- **Demo video:** `https://youtu.be/rcE7c7ANya4`
 
 ## How it works
 
@@ -47,15 +47,15 @@ Open http://localhost:3000 and press **Log in as demo**.
 
 With no keys the app uses a mock product catalog, a mock PayPal checkout and a scripted agent, so the whole flow works. To use the real services, put keys in `server/.env`:
 
-| Variable | What it turns on |
-|---|---|
-| `GEMINI_API_KEY` (and `GEMINI_MODEL`) | The Gemini agent. Model names change, so if you see a "model not found" error, copy a current name from Google AI Studio. |
-| `ANTHROPIC_API_KEY` | The Claude agent, used when no Gemini key is set |
-| `CHANNEL3_API_KEY` | Live product search and prices |
-| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal **sandbox** checkout (use sandbox credentials, never live ones) |
-| `DATABASE_URL` | Stores accounts and data in PostgreSQL (for example a free Neon database). Empty = JSON files in `server/data/`. |
-| `GMAIL_USER`, `GMAIL_APP_PASSWORD` | Sends OTP codes from your Gmail through SMTP. Use an [App Password](https://myaccount.google.com/apppasswords), not your normal password. Empty = the code is shown on screen. |
-| `RESEND_API_KEY` | Alternative email sender over HTTPS (without a verified domain it only delivers to your own address) |
+| Variable                                   | What it turns on                                                                                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GEMINI_API_KEY` (and `GEMINI_MODEL`)      | The Gemini agent. Model names change, so if you see a "model not found" error, copy a current name from Google AI Studio.                                                      |
+| `ANTHROPIC_API_KEY`                        | The Claude agent, used when no Gemini key is set                                                                                                                               |
+| `CHANNEL3_API_KEY`                         | Live product search and prices                                                                                                                                                 |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal **sandbox** checkout (use sandbox credentials, never live ones)                                                                                                         |
+| `DATABASE_URL`                             | Stores accounts and data in PostgreSQL (for example a free Neon database). Empty = JSON files in `server/data/`.                                                               |
+| `GMAIL_USER`, `GMAIL_APP_PASSWORD`         | Sends OTP codes from your Gmail through SMTP. Use an [App Password](https://myaccount.google.com/apppasswords), not your normal password. Empty = the code is shown on screen. |
+| `RESEND_API_KEY`                           | Alternative email sender over HTTPS (without a verified domain it only delivers to your own address)                                                                           |
 
 After adding keys, run `npm run check` in `server/`. It tests each service and tells you what to fix. `npm run check -- --agent` also runs the whole agent (no payment is made).
 
